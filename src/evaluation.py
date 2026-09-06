@@ -1,4 +1,4 @@
-﻿"""
+"""
 evaluation.py
 Comprehensive evaluation pipeline for vessel trajectory forecasting models.
 Calculates geodesic forecast errors (Mean, Median, RMSE, P90) on WGS-84 in kilometres.
@@ -83,6 +83,8 @@ def evaluate_models_on_dataset(
                 "origin_lon": w.origin_lon,
                 "origin_sog": w.origin_sog,
                 "origin_cog": w.origin_cog,
+                "mean_sog": getattr(w, "mean_sog", w.origin_sog),
+                "is_underway": getattr(w, "is_underway", True),
                 "pred_4h_lat": p4[0],
                 "pred_4h_lon": p4[1],
                 "true_4h_lat": t4_true["lat"],

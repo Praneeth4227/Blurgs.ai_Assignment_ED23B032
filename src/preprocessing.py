@@ -1,4 +1,4 @@
-﻿"""
+"""
 preprocessing.py
 Data cleaning, anomaly filtering, deduplication, and trajectory splitting for AIS data.
 """
@@ -37,13 +37,14 @@ def remove_duplicate_records(
 
 def filter_speeds(
     df: pd.DataFrame,
-    min_sog: float = 0.5,
-    max_sog: float = 40.0
+    min_sog: float = 0.0,
+    max_sog: float = 45.0
 ) -> pd.DataFrame:
     """
     Filters Speed Over Ground (SOG):
-      - SOG < min_sog: vessel is moored or stationary (not underway).
-      - SOG > max_sog: physically unrealistic for commercial vessels, reflects GPS jitter.
+      - Keeps legitimate speeds from 0.0 knots up to max_sog.
+      - SOG > max_sog: physically unrealistic for commercial displacement vessels,
+        reflecting GPS jump anomalies or transceiver transmission glitches.
     """
     mask = (
         df["sog"].notnull() &
@@ -58,12 +59,15 @@ def filter_courses(
     min_cog: float = 0.0,
     max_cog: float = 360.0
 ) -> pd.DataFrame:
-    """Filters Course Over Ground (COG) to valid compass range [0, 360]."""
-    mask = (
-        df["cog"].notnull() &
-        (df["cog"] >= min_cog) &
-        (df["cog"] <= max_cog)
-    )
+    """
+    Filters Course Over Ground (COG):
+      - Valid compass range is [0.0, 360.0] degrees clockwise from North.
+      - Allows null/NaN COG when vessel is stationary (where Doppler heading is undefined),
+        but removes out-of-range COG values when present.
+    """
+    valid_range = (df["cog"] >= min_cog) & (df["cog"] <= max_cog)
+    is_stationary = (df["sog"] <= 0.5) & df["cog"].isnull()
+    mask = valid_range | is_stationary
     return df[mask].copy()
 
 
@@ -98,8 +102,8 @@ def clean_ais_pipeline(
     max_lat: float = 32.0,
     min_lon: float = -85.0,
     max_lon: float = -78.0,
-    min_sog: float = 0.5,
-    max_sog: float = 40.0,
+    min_sog: float = 0.0,
+    max_sog: float = 45.0,
     max_gap_hours: float = 1.0,
     min_points_per_trajectory: int = 15,
     min_trajectory_hours: float = 10.0

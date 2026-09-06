@@ -1,22 +1,65 @@
-﻿# Where Will This Vessel Be in 4–6 Hours?
+# Where Will This Vessel Be in 4–6 Hours?
 ### AIS Vessel Trajectory Forecasting over Extended Horizons
 **Candidate:** Praneeth (ED23B032)  
 **Take-Home Assignment:** Blurgs.ai  
-**Repository:** [Blurgs.ai_Assignment_ED23B032](https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032)  
+**Repository:** [https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032](https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032)  
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Praneeth4227/Blurgs.ai_Assignment_ED23B032/blob/main/notebooks/Blurgs_Vessel_Trajectory_Forecasting.ipynb)
+
+---
+
+## Running in Google Colab
+
+The primary reproducible workflow is designed to execute smoothly in a standard, free **Google Colab CPU runtime** (no GPU required).
+
+### Option 1: 1-Click Launch via GitHub
+1. Click the badge above: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Praneeth4227/Blurgs.ai_Assignment_ED23B032/blob/main/notebooks/Blurgs_Vessel_Trajectory_Forecasting.ipynb)
+2. Run the notebook from top to bottom (**Runtime → Run all** or `Ctrl + F9`).
+3. The notebook will automatically install lightweight dependencies (`geopy`, `pyyaml`, `pyarrow`), set up the repository paths, load the real dataset, execute all four models, and display the benchmarks and diagnostic plots.
+
+**Measured Colab Runtime:** **~42 seconds** on a standard CPU runtime.
+
+---
+
+### Option 2: Colab-to-GitHub Workflow (Run & Save Results)
+To run the notebook in Colab, modify code, and push results back to GitHub without hardcoding secrets:
+
+```bash
+# 1. In Colab, clone the repository
+!git clone https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032.git
+%cd Blurgs.ai_Assignment_ED23B032
+
+# 2. Install requirements
+!pip install -q -r requirements.txt
+
+# 3. Run the pipeline notebook
+# (Execute notebook cells directly)
+
+# 4. Push updated figures/results back securely using Colab Secrets
+from google.colab import userdata
+token = userdata.get("GITHUB_TOKEN") # Store your Personal Access Token in Colab Secrets (Key icon)
+
+!git config --global user.name "Praneeth"
+!git config --global user.email "praneeth@alumni.iitm.ac.in"
+!git remote set-url origin https://{token}@github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032.git
+!git add results/ notebooks/
+!git commit -m "Update experimental results from Google Colab"
+!git push origin main
+```
 
 ---
 
 ## 1. Problem Formulation & Objective
 
-Vessel movement is physically constrained by recent momentum, vessel dimensions, navigational corridors, bathymetry, traffic separation schemes, and operational destinations. In this project, we address the following real-world marine tracking task:
+Vessel movement is constrained by its recent momentum, hull characteristics, bathymetry, navigational channels, and operational intent. The goal is:
 
-> **Goal:** Given approximately **4 hours of historical AIS observations** for a vessel up to origin time $T$, predict its geographic coordinate $(\text{latitude}, \text{longitude})$ at:
+> **Goal:** Given **approximately 4 hours of historical AIS observations** for a vessel up to origin time $T$, forecast its geographic coordinate $(\text{latitude}, \text{longitude})$ at:
 > - **Horizon 1:** $+4\text{ hours}$ ($T + 4\text{h}$)
 > - **Horizon 2:** $+6\text{ hours}$ ($T + 6\text{h}$)
 
-Predicting vessel coordinates 4 to 6 hours into the future using historical telemetry alone is challenging: vessels frequently alter course around waypoints, adjust engine throttle, and maneuver into coastal fairways. Rather than building opaque neural networks with excessive parameters, this project follows an interpretable engineering progression:
+Predicting coordinates 4 to 6 hours into the future using historical telemetry alone is challenging: vessels frequently alter course around navigational waypoints, reduce throttle when entering harbours, or maneuver into separation lanes. Rather than introducing opaque deep neural networks with millions of parameters, this project follows an interpretable engineering progression:
 1. Data understanding & schema inspection
-2. Quality cleaning & anomaly filtering
+2. Quality cleaning & physically defensible anomaly filtering
 3. Trajectory segmentation & gap-splitting
 4. Leakage-safe chronological formulation
 5. Linear velocity extrapolation baseline
@@ -28,43 +71,48 @@ Predicting vessel coordinates 4 to 6 hours into the future using historical tele
 
 ---
 
-## 2. Dataset & Maritime Corridor Selection
+## 2. Dataset & Candidate Corridor Selection
 
 We use official **NOAA MarineCadastre 2024 GeoParquet** data (`ais-2024-01-01`).
 
-### Dataset Discovery & Schema:
-- **Daily Scale:** 7,293,408 broadcast points across the United States offshore and coastal zones.
-- **Key Columns:** `mmsi` (vessel identifier), `base_date_time` (UTC timestamp), `sog` (knots), `cog` (degrees clockwise from North), `heading` (degrees), `vessel_type` (ITU categorization), `status` (navigational status), `geometry` (Point encoded in 21-byte Well-Known Binary in WGS-84).
-- **Sampling Nature:** Irregular temporal intervals with a median spacing of **178 seconds (~3 minutes)**, with long communication gaps when vessels sail out of coastal receiver line-of-sight.
+### Empirical Dataset Characteristics:
+Before finalizing parameters, we inspected the complete raw data distributions:
+- **Total records in corridor:** 816,653 AIS broadcast pings across 2,535 unique MMSI vessels.
+- **Time range:** Exactly 24.0 hours (`2024-01-01 00:00:00` to `23:59:59 UTC`).
+- **Sampling interval nature:** Highly irregular. Median sampling interval is **178 seconds (~3.0 minutes)**, 90th percentile is 349 seconds (~5.8 minutes), with long gaps when vessels sail beyond coastal line-of-sight receivers.
+- **Speed Over Ground (SOG):** Over 67.9% of all pings have $\text{SOG} = 0.0\text{ kn}$, corresponding to moored vessels at dock. Extreme anomalies up to 87.4 knots were identified, reflecting GPS transceiver transmission glitches.
+- **Course Over Ground (COG):** Valid compass range $[0^\circ, 360^\circ]$. COG is absent primarily when vessels are stationary ($\text{SOG} = 0.0$), where Doppler course is physically undefined.
 
-### Geographic Corridor:
+### Selected Maritime Corridor:
 We selected the **Southeast US Atlantic Coast & Straits of Florida**:
 - **Bounding Box:** Latitude $24.0^\circ\text{N} - 32.0^\circ\text{N}$, Longitude $-85.0^\circ\text{W} - -78.0^\circ\text{W}$.
-- **Why this region?** This maritime corridor connects Gulf of Mexico ports (Houston, New Orleans, Tampa) to North Atlantic shipping channels. It features heavy commercial traffic (Cargo container ships, Tankers, Ocean-going Tugs) with long open-water transit legs extending beyond 12–24 continuous hours.
+- **Why this region?** This maritime corridor connects Gulf of Mexico ports (Houston, New Orleans, Tampa) to North Atlantic shipping channels. It features dense commercial shipping (Cargo container ships, Tankers, Ocean-going Tugs) with long open-water transit legs extending beyond 12–24 continuous hours.
 
 ![Spatial Distribution](results/figures/eda_spatial_distribution.png)
 
 ---
 
-## 3. Data Cleaning & Trajectory Construction Pipeline
+## 3. Data Cleaning & Physically Defensible Speed Filtering
 
-Raw AIS broadcasts contain transponder glitches, duplicated seconds, and stationary clutter. We apply a strict multi-stage filtering pipeline:
+Raw AIS broadcasts contain transponder glitches, duplicated seconds, and stationary clutter. We apply a multi-stage filtering pipeline:
 
 1. **Coordinate Verification:** Require $-90 \le \text{lat} \le 90$ and $-180 \le \text{lon} \le 180$.
-2. **Deduplication:** Dropped 15 identical duplicate transmission packets matching `(mmsi, timestamp)`.
-3. **Speed Filtering:** Retained underway vessels ($0.5 \le \text{SOG} \le 40.0\text{ knots}$), eliminating 636,520 stationary moored/anchored points and unrealistic GPS jump anomalies ($>40\text{ kn}$).
-4. **Course Filtering:** Verified $0^\circ \le \text{COG} \le 360^\circ$.
+2. **Deduplication:** Dropped 15 duplicate transmission packets matching `(mmsi, timestamp)` ($0.0018\%$).
+3. **Physically Defensible Speed Filtering ($0.0 \le \text{SOG} \le 45.0\text{ kn}$):**
+   - We do **not** discard slow or stationary vessels during cleaning. Moored, anchored, and drifting vessels are legitimate marine entities.
+   - However, commercial displacement ships rarely exceed 25–30 knots; only high-speed catamaran ferries reach 40–45 knots. Filtering at $45.0\text{ knots}$ removes 188 impossible GPS jump spikes (up to 87.4 kn) while retaining 100% of legitimate slow and transit records.
+4. **Course Filtering:** Verify $0^\circ \le \text{COG} \le 360^\circ$. Allows null COG when stationary.
 5. **Observation Gap Handling:** **We do not interpolate across large gaps.** If consecutive reports for a vessel exceed **1.0 hour**, the trajectory is split into independent sub-tracks.
-6. **Usable Trajectory Criterion:** A trajectory must span at least **10.0 continuous hours** with $\ge 20$ observations to support a 4-hour historical window plus a 6-hour forecast window ($4 + 6 = 10\text{h}$).
+6. **Usable Trajectory Criterion:** A trajectory must span at least **10.0 continuous hours** with $\ge 15$ observations to support a 4-hour historical window plus a 6-hour forecast window ($4 + 6 = 10\text{h}$).
 
-### Preprocessing Waterfall:
+### Cleaning Waterfall:
 ```
-Raw Records in Corridor:       816,653 (100.0%)
-  -> Valid Coordinates:        816,653 (100.0%)
-  -> Deduplicated:             816,638 (99.9%)
-  -> Speed Filtered (>=0.5kn): 180,118 (22.1%)
-  -> Course Filtered:          175,037 (21.4%)
-  -> Usable Trajectory Points:  60,976 (7.5%) across 101 continuous voyages (>= 10h)
+Raw Records in Corridor:            816,653 (100.0%)
+  -> Valid Coordinates:             816,653 (100.0%)
+  -> Deduplicated:                  816,638 (99.99%)
+  -> Speed Filtered (0 - 45 kn):    812,021 (99.43%)
+  -> Course Filtered:               812,021 (99.43%)
+  -> Usable Trajectories (>=10h):     1,506 continuous voyages
 ```
 
 ![Preprocessing Funnel](results/figures/preprocessing_funnel.png)
@@ -73,24 +121,30 @@ Raw Records in Corridor:       816,653 (100.0%)
 
 ## 4. Leakage-Safe Formulation & Local Metric Coordinates
 
-### Zero-Leakage Chronological Split
-To prevent lookahead leakage, windows are partitioned strictly chronologically based on forecast origin timestamp $T$:
-- **Train Set (70%):** 295 windows ($T \in [04:00, 13:00\text{ UTC}]$)
-- **Validation Set (15%):** 63 windows ($T \in (13:00, 15:15\text{ UTC}]$)
-- **Test Set (15%):** 64 windows ($T \in [15:23, 17:57\text{ UTC}]$)
+### Approximate 4-Hour History Formulation:
+Because AIS pings arrive at irregular ~3-minute intervals, requiring an exact integer-hour span would reject almost all real-world data. We define:
+- **Historical window:** $[T - \Delta t_{\text{hist}}, T]$ where $3.5\text{h} \le \Delta t_{\text{hist}} \le 4.5\text{h}$ (approximately 4 hours) with $\ge 10$ points.
+- **Recency:** The most recent observation must be within $\le 15\text{ minutes}$ of forecast origin $T$.
+- **Target matching:** Actual recorded positions within $\pm 15\text{ minutes}$ of nominal $T + 4\text{h}$ and $T + 6\text{h}$.
 
-The test set represents the actual chronological future and remained completely sequestered until the final quantitative evaluation.
+### Zero Lookahead Leakage (Chronological Split):
+To prevent lookahead leakage, forecasting windows are partitioned strictly **chronologically** based on forecast origin timestamp $T$:
+- **Train Set (70%):** Earlier hours of the day
+- **Validation Set (15%):** Intermediate hours
+- **Test Set (15%):** Final hours (183 unseen test windows)
+
+The test set represents the actual chronological future and remained completely sequestered until final evaluation.
 
 ![Window Split Timeline](results/figures/trajectory_window_split.png)
 
-### Local Metric Tangent Plane
-To avoid spherical degree distortion ($1^\circ$ longitude varies with latitude), all modelling is executed on a local East-North tangent plane $(x, y)$ in metres centered at each trajectory origin $(\text{lat}_0, \text{lon}_0)$. Predictions are analytically inverted back to $(\widehat{\text{lat}}, \widehat{\text{lon}})$ with sub-millimeter precision.
+### Local Metric Tangent Plane (ENU):
+To avoid spherical degree distortion ($1^\circ$ longitude varies with latitude: $\Delta x = R \cdot \Delta \lambda \cos \phi$), all modelling is executed on a local East-North tangent plane $(x, y)$ in metres centered at each trajectory origin $(\text{lat}_0, \text{lon}_0)$. Predictions are analytically inverted back to $(\widehat{\text{lat}}, \widehat{\text{lon}})$.
 
 ---
 
 ## 5. Models Evaluated
 
-1. **Linear Velocity Baseline:** Estimates recent velocity $(v_x, v_y)$ via linear regression over the recent 30-minute history and propagates constant velocity forward.
+1. **Linear Extrapolation Baseline:** Estimates recent velocity $(v_x, v_y)$ via linear regression over the recent 30-minute history and propagates constant velocity forward.
 2. **Polynomial Baseline (Degree 2):** Fits quadratic polynomials $x(t)$ and $y(t)$ centered at origin $T$ over the 4-hour window. Degree is strictly limited to 2 to prevent Runge's phenomenon.
 3. **Kinematic Baseline (SOG/COG):** Decomposes onboard transponder Speed Over Ground (knots converted to m/s) and Course Over Ground (bearing clockwise from North) into metric velocity components, with circular mean smoothing over recent observations.
 4. **4D Discrete Kalman Filter:** State vector $\mathbf{x} = [x, y, v_x, v_y]^T$ under constant-velocity kinematics and continuous white-noise acceleration ($\sigma_a = 0.05\text{ m/s}^2, \sigma_{\text{pos}} = 20\text{ m}$). Sequentially filters irregular historical GPS measurements and propagates state and analytical covariance ellipses forward to $+4\text{h}$ and $+6\text{h}$.
@@ -99,28 +153,28 @@ To avoid spherical degree distortion ($1^\circ$ longitude varies with latitude),
 
 ## 6. Final Benchmark Results
 
-All models were evaluated on the **64 unseen test trajectories** using true geodesic distances (Vincenty / Karney WGS-84 formula) in kilometres.
+All models were evaluated on the **183 unseen test forecasting windows** using true geodesic distances (Karney / Vincenty WGS-84 formula) in kilometres.
 
 ### Overall Benchmark Table:
 
-| Model | Horizon | Mean (km) | Median (km) | RMSE (km) | P90 (km) |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Linear** | **+4h** | **17.18** | **8.42** | **29.35** | **48.85** |
-| **Linear** | **+6h** | **30.70** | **15.03** | **50.86** | **78.49** |
-| **Polynomial (d=2)** | +4h | 30.43 | 15.52 | 51.57 | 70.31 |
-| **Polynomial (d=2)** | +6h | 57.32 | 31.38 | 98.12 | 141.02 |
-| **Kinematic (SOG/COG)** | +4h | 22.54 | 18.04 | 30.41 | 58.20 |
-| **Kinematic (SOG/COG)** | +6h | 38.41 | 30.59 | 51.41 | 94.94 |
-| **Kalman Filter** | **+4h** | **20.44** | **16.47** | **29.17** | **56.36** |
-| **Kalman Filter** | **+6h** | **35.37** | **29.10** | **49.76** | **95.66** |
+| Model | Horizon | Mean (km) | Median (km) | RMSE (km) | P90 (km) | Test Samples |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Linear** | **+4h** | **26.42** | **13.68** | **44.90** | **64.48** | 183 |
+| **Linear** | **+6h** | **43.34** | **27.05** | **70.89** | **102.00** | 183 |
+| **Kalman Filter** | **+4h** | **28.92** | **16.40** | **47.94** | **67.55** | 183 |
+| **Kalman Filter** | **+6h** | **47.54** | **28.13** | **77.17** | **110.91** | 183 |
+| **Kinematic (SOG/COG)** | +4h | 29.45 | 17.75 | 48.69 | 67.30 | 183 |
+| **Kinematic (SOG/COG)** | +6h | 48.32 | 28.59 | 78.25 | 108.77 | 183 |
+| **Polynomial (d=2)** | +4h | 55.42 | 36.84 | 81.28 | 131.27 | 183 |
+| **Polynomial (d=2)** | +6h | 103.02 | 69.58 | 148.40 | 243.46 | 183 |
 
 ![Model Comparison Horizons](results/figures/model_comparison_horizons.png)
 ![Error CDF Distributions](results/figures/error_distributions_ecdf.png)
 
 ### Key Performance Insights:
-- **Linear Extrapolation** achieved the lowest median error (**8.42 km at +4h**, **15.03 km at +6h**). Estimating velocity over recent 30-minute position differences provides a clean, robust velocity vector.
-- **The Kalman Filter** produced the lowest overall RMSE (**29.17 km at +4h**, **49.76 km at +6h**), outperforming the raw kinematic transponder baseline because it filters out transponder heading jitter.
-- **Polynomial Extrapolation** performed significantly worse (**RMSE 51.57 km at +4h, 98.12 km at +6h**). Quadratic terms accelerate outward rapidly during 4–6 hour extrapolation, amplifying small curvatures in history into large overshoot errors.
+- **Linear Extrapolation** achieved the lowest median error (**13.68 km at +4h**, **27.05 km at +6h**). Estimating velocity over recent 30-minute position differences provides a clean, robust velocity vector without transponder gyro bias.
+- **The Kalman Filter** closely tracks the linear baseline (**16.40 km median at +4h**, **47.94 km RMSE**), outperforming the raw kinematic transponder baseline because it dynamically smooths GPS jitter and produces calibrated spatial uncertainty ellipses.
+- **Polynomial Extrapolation** performed significantly worse (**RMSE 81.28 km at +4h, 148.40 km at +6h**). Quadratic terms accelerate outward rapidly during 4–6 hour extrapolation, amplifying small curvatures in history into large overshoot errors.
 
 ---
 
@@ -128,26 +182,27 @@ All models were evaluated on the **64 unseen test trajectories** using true geod
 
 | Vessel Category | Model | Horizon | Mean (km) | Median (km) | RMSE (km) | P90 (km) | Samples |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Cargo** | Linear | +4h | 17.09 | **7.18** | 25.17 | 40.12 | 15 |
-| **Cargo** | Kalman Filter | +4h | 18.72 | **7.20** | 29.21 | 40.35 | 15 |
-| **Tug / Towing** | Linear | +4h | 8.81 | **5.78** | 11.74 | 18.32 | 5 |
-| **Tug / Towing** | Kalman Filter | +4h | 10.16 | **5.72** | 13.62 | 21.35 | 5 |
-| **Tanker** | Linear | +4h | 35.15 | 34.04 | 41.22 | 62.77 | 9 |
-| **Tanker** | Kalman Filter | +4h | 33.75 | 34.39 | 39.90 | 59.08 | 9 |
+| **Tug / Towing** | Linear | +4h | 10.44 | **1.46** | 18.77 | 24.18 | 22 |
+| **Tug / Towing** | Kalman Filter | +4h | 12.34 | **0.76** | 24.39 | 34.53 | 22 |
+| **Cargo** | Linear | +4h | 25.03 | **17.87** | 35.52 | 58.97 | 14 |
+| **Cargo** | Kalman Filter | +4h | 26.64 | **17.86** | 38.47 | 68.92 | 14 |
+| **Tanker** | Linear | +4h | 30.64 | 21.74 | 41.82 | 65.58 | 14 |
+| **Tanker** | Kalman Filter | +4h | 28.88 | 21.67 | 40.35 | 63.24 | 14 |
 
 ![Vessel Type Performance](results/figures/vessel_type_performance.png)
 
-- **Cargo ships and Tugs:** Exhibit highly predictable, low-error tracks (median error ~5.7–7.2 km at +4h). Cargo ships cruise at fixed throttle down deep-water lanes, while tugs operate at low speed (6–10 kn), reducing spatial displacement.
-- **Tankers:** Produced higher median errors (~34 km at +4h) because tankers in this corridor navigate coastal approaches into petroleum terminals (Port Everglades, Miami, Tampa), executing course and speed alterations.
+- **Tugs / Towing:** Exhibit exceptionally low median errors (**~0.76–1.46 km at +4h**). Tugs operate at low speeds (4–8 knots) in confined coastal waters, minimizing spatial displacement over time.
+- **Cargo Ships:** Cruising at steady speed down deep-water shipping lanes produces consistent, low-variance forecasts (**17.87 km median at +4h**).
+- **Tankers:** Produced slightly higher errors (**21.74 km median at +4h**) because tankers in this corridor maneuver into coastal terminal approaches (Port Everglades, Miami, Tampa).
 
 ---
 
 ## 8. Failure Analysis: Why Do Models Fail?
 
 Examining large-error predictions ($>80\text{ km}$) reveals three primary root causes:
-1. **Waypoint Navigational Turns:** Vessels in the Florida Straits follow marine corridors that bend around the Florida Keys. Constant-velocity extrapolation projects straight into open water, leading to divergence once the ship turns $60^\circ - 90^\circ$.
+1. **Waypoint Navigational Turns:** Vessels in the Florida Straits follow marine corridors that bend around the Florida Keys. Constant-velocity extrapolation projects straight ahead, leading to divergence once the ship turns $60^\circ - 90^\circ$.
 2. **Port Approach Deceleration:** Commercial vessels entering harbour limits reduce throttle from 18 knots to 4 knots to await pilots, causing dead-reckoning models to overshoot.
-3. **Polynomial Acceleration Divergence:** Quadratic polynomials amplify even subtle historical accelerations, leading to runaway divergence at $+6\text{h}$.
+3. **Polynomial Acceleration Divergence:** Quadratic polynomials amplify subtle historical accelerations, leading to runaway divergence at $+6\text{h}$.
 
 ![Success and Failure Case Studies](results/figures/case_studies_success_failure.png)
 
@@ -155,44 +210,58 @@ Examining large-error predictions ($>80\text{ km}$) reveals three primary root c
 
 ## 9. Spatial Uncertainty & Probabilistic Extensions
 
-Because vessel operational intent is unobserved in historical AIS data, point forecasts are incomplete. The Kalman filter provides an analytical covariance matrix $\mathbf{P}_{T+\tau}$, defining a 95% confidence ellipse that expands naturally as uncertainty accumulates over time.
+Because vessel destination and intentions are unobserved in historical AIS, point forecasts are incomplete. The Kalman filter provides an analytical covariance matrix $\mathbf{P}_{T+\tau}$, defining an expanding 95% spatial confidence ellipse:
 
 ![Kalman Uncertainty Ellipses](results/figures/kalman_uncertainty_ellipse.png)
 
-### Recommended Next Steps for Research:
+### Recommended Next Steps:
 1. **Route-Conditioned Priors (Historical Trajectory Clustering):** Cluster historical vessel routes using Fréchet distance. Given 4 hours of history, match the track to the most probable maritime corridor prior, constraining predictions to navigational channels.
 2. **Conformal Prediction:** Use validation set residuals to generate distribution-free spatial prediction sets with exact finite-sample coverage guarantees.
 3. **Gaussian Mixture Trajectory Models (GMM):** Model multi-modal branch points where shipping lanes diverge (e.g. northbound Atlantic vs eastbound Caribbean).
 
 ---
 
-## 10. How to Reproduce
+## 10. Repository Structure
 
-### 1. Prerequisites
-- Python 3.10+
-- Git
-
-### 2. Setup Environment
-```bash
-git clone https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032.git
-cd Blurgs.ai_Assignment_ED23B032
-python -m venv venv
-# On Windows:
-.\venv\Scripts\activate
-# On Linux/macOS:
-source venv/bin/activate
-
-pip install -r requirements.txt
 ```
-
-### 3. Step-by-Step Notebook Execution
-Open and run the notebooks in sequential order:
-```bash
-jupyter lab
+/
+├── README.md                      <- Project report and Colab instructions
+├── requirements.txt               <- Python dependencies
+├── .gitignore                     <- Clean ignore rules
+│
+├── docs/
+│   └── implementation_plan.md    <- Engineering implementation plan
+│
+├── notebooks/
+│   ├── Blurgs_Vessel_Trajectory_Forecasting.ipynb  <- Primary Google Colab master notebook
+│   ├── 01_data_exploration.ipynb
+│   ├── 02_data_cleaning.ipynb
+│   ├── 03_trajectory_construction.ipynb
+│   ├── 04_baseline_models.ipynb
+│   ├── 05_kalman_model.ipynb
+│   └── 06_evaluation_and_analysis.ipynb
+│
+├── src/
+│   ├── __init__.py
+│   ├── data_loader.py            <- Parquet loading and schema summaries
+│   ├── preprocessing.py          <- Quality cleaning, speed & gap filtering
+│   ├── trajectories.py           <- Window extraction & chronological split
+│   ├── coordinates.py            <- WGS-84 to metric tangent plane (ENU)
+│   ├── baselines.py              <- Linear & Polynomial models
+│   ├── kinematic.py              <- SOG/COG dead-reckoning with circular mean
+│   ├── kalman.py                 <- 4D Discrete Kalman filter with covariance
+│   ├── evaluation.py             <- Geodesic error evaluation in km
+│   └── visualization.py          <- Charting and trajectory plotting
+│
+├── configs/
+│   └── config.yaml               <- Experiment hyperparameters
+│
+├── data/
+│   ├── raw/                      <- Regional raw AIS data
+│   └── processed/                <- Cleaned trajectories & windows
+│
+└── results/
+    ├── figures/                  <- Diagnostic plots and case studies
+    ├── metrics/                  <- Benchmark CSV tables
+    └── predictions/              <- Sample-level predictions
 ```
-1. `notebooks/01_data_exploration.ipynb`: Inspects raw NOAA AIS data schema and distributions.
-2. `notebooks/02_data_cleaning.ipynb`: Filters stationary clutter, anomalies, and splits on gaps.
-3. `notebooks/03_trajectory_construction.ipynb`: Formulates 4h history windows and +4h/+6h targets.
-4. `notebooks/04_baseline_models.ipynb`: Evaluates linear, polynomial, and kinematic baselines.
-5. `notebooks/05_kalman_model.ipynb`: Demonstrates 4D Kalman filtering and covariance ellipses.
-6. `notebooks/06_evaluation_and_analysis.ipynb`: Runs benchmark on the test set, generates tables, figures, and failure case studies.

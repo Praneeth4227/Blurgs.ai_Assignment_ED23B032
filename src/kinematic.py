@@ -1,4 +1,4 @@
-﻿"""
+"""
 kinematic.py
 Baseline 2: Kinematic motion model utilizing reported Speed Over Ground (SOG)
 and Course Over Ground (COG) telemetry.
@@ -45,23 +45,33 @@ class KinematicModel:
         k = min(self.smooth_window_points, len(hist))
         recent_pts = hist.iloc[-k:]
 
-        # Average recent SOG and COG (handling circular angle averaging for COG)
-        sog_knots = float(recent_pts["sog"].mean())
-        
-        # Circular mean for Course Over Ground
-        cog_rad = np.radians(recent_pts["cog"].values)
-        sin_mean = np.mean(np.sin(cog_rad))
-        cos_mean = np.mean(np.cos(cog_rad))
-        mean_cog_rad = np.arctan2(sin_mean, cos_mean)
-        if mean_cog_rad < 0:
-            mean_cog_rad += 2 * np.pi
+        # Average recent SOG, handling NaNs
+        sog_series = recent_pts["sog"].dropna()
+        sog_knots = float(sog_series.mean()) if len(sog_series) > 0 else 0.0
 
-        # Convert speed from knots to metres/second
-        speed_mps = sog_knots * KNOTS_TO_METRES_PER_SECOND
+        # Circular mean for Course Over Ground over valid non-null COG reports
+        valid_cogs = recent_pts["cog"].dropna().values
+        if len(valid_cogs) == 0:
+            # Fall back to most recent valid COG in full history
+            hist_cogs = hist["cog"].dropna().values
+            if len(hist_cogs) > 0:
+                valid_cogs = np.array([hist_cogs[-1]])
 
-        # Decompose into East and North metric velocity (m/s)
-        vx = speed_mps * np.sin(mean_cog_rad)
-        vy = speed_mps * np.cos(mean_cog_rad)
+        if len(valid_cogs) > 0 and not np.isnan(sog_knots) and sog_knots > 0:
+            cog_rad = np.radians(valid_cogs)
+            sin_mean = np.mean(np.sin(cog_rad))
+            cos_mean = np.mean(np.cos(cog_rad))
+            mean_cog_rad = np.arctan2(sin_mean, cos_mean)
+            if mean_cog_rad < 0:
+                mean_cog_rad += 2 * np.pi
+
+            speed_mps = sog_knots * KNOTS_TO_METRES_PER_SECOND
+            vx = speed_mps * np.sin(mean_cog_rad)
+            vy = speed_mps * np.cos(mean_cog_rad)
+        else:
+            # Stationary vessel or no heading telemetry: zero metric velocity
+            vx = 0.0
+            vy = 0.0
 
         predictions = {}
         for h in forecast_horizons_hours:

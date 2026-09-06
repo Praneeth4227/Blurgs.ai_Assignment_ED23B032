@@ -1,4 +1,4 @@
-﻿"""
+"""
 data_loader.py
 Module for downloading, unpacking, and loading raw NOAA MarineCadastre AIS data.
 Handles WKB geometry decoding into geographic coordinates and regional extraction.
@@ -45,10 +45,7 @@ def load_ais_data(
     if columns is None:
         df = pd.read_parquet(file_path)
     else:
-        # Ensure geometry is included if needed for lat/lon extraction
-        cols_to_read = list(columns)
-        has_coords = "longitude" in df.columns if False else True
-        df = pd.read_parquet(file_path, columns=cols_to_read)
+        df = pd.read_parquet(file_path, columns=list(columns))
 
     if "geometry" in df.columns:
         lons, lats = decode_wkb_points(df["geometry"].values)

@@ -1,4 +1,4 @@
-﻿"""
+"""
 trajectories.py
 Trajectory window formulation and leakage-safe chronological dataset splitting.
 Extracts 4-hour historical input observations and links actual positions at +4h and +6h.
@@ -48,6 +48,14 @@ class ForecastingWindow:
     def origin_cog(self) -> float:
         return float(self.history_df.iloc[-1]["cog"])
 
+    @property
+    def mean_sog(self) -> float:
+        return float(self.history_df["sog"].mean()) if "sog" in self.history_df.columns else 0.0
+
+    @property
+    def is_underway(self) -> bool:
+        return self.mean_sog >= 0.5
+
     def to_dict(self) -> dict:
         return {
             "sample_id": self.sample_id,
@@ -59,6 +67,8 @@ class ForecastingWindow:
             "origin_lon": self.origin_lon,
             "origin_sog": self.origin_sog,
             "origin_cog": self.origin_cog,
+            "mean_sog": self.mean_sog,
+            "is_underway": self.is_underway,
             "history_num_points": len(self.history_df),
             "target_4h_time": self.target_4h["time"],
             "target_4h_lat": self.target_4h["lat"],
