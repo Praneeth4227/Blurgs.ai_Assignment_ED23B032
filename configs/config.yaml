@@ -1,0 +1,62 @@
+﻿# Configuration for Vessel Trajectory Forecasting (4-6 Hours Horizon)
+
+project:
+  title: "Where Will This Vessel Be in 4-6 Hours?"
+  candidate: "Praneeth (ED23B032)"
+  assignment: "Blurgs.ai Take-Home Assignment"
+  random_seed: 42
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  source_name: "NOAA MarineCadastre GeoParquet 2024"
+  date: "2024-01-01"
+  source_url: "https://ocmgeodatastor1.blob.core.windows.net/marinecadastre/ais2024/ais-2024-01-01.parquet"
+  
+  # Geographic bounding box for focused evaluation (Florida Straits & Southeast US Coastal Corridor)
+  bounding_box:
+    min_lat: 24.0
+    max_lat: 32.0
+    min_lon: -85.0
+    max_lon: -78.0
+
+cleaning:
+  coordinate_bounds:
+    lat_min: -90.0
+    lat_max: 90.0
+    lon_min: -180.0
+    lon_max: 180.0
+  speed_bounds:
+    min_sog: 0.5   # knots (filter out stationary / anchored craft for underway trajectory forecasting)
+    max_sog: 40.0  # knots (commercial vessels rarely exceed 35-40 knots; eliminates GPS glitch outliers)
+  course_bounds:
+    min_cog: 0.0
+    max_cog: 360.0
+  max_trajectory_gap_hours: 1.0  # Split trajectory if consecutive AIS records exceed 1 hour gap
+
+trajectory_window:
+  history_duration_hours: 4.0      # Input window [T - 4h, T]
+  min_history_points: 10          # Require sufficient points for robust kinematic and polynomial fitting
+  forecast_horizons_hours: [4.0, 6.0]
+  target_tolerance_minutes: 15.0   # Window tolerance around exact T+4h and T+6h evaluation points
+
+split:
+  strategy: "chronological"        # Strict time-based split to guarantee zero lookahead leakage
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+models:
+  linear:
+    recent_window_minutes: 30     # Velocity estimation from recent observations
+  polynomial:
+    degree: 2                     # Low-degree quadratic polynomial to avoid overfitting oscillations
+  kinematic:
+    use_sog_cog: true
+    smooth_window_points: 3       # Optional rolling mean for noisy SOG/COG
+  kalman:
+    state_dim: 4                  # [x, y, vx, vy]
+    measurement_dim: 2            # [x, y]
+    process_noise_pos: 10.0       # Process noise std for position (meters)
+    process_noise_vel: 0.5        # Process noise std for velocity (m/s)
+    measurement_noise: 25.0       # GPS measurement noise std (meters)
