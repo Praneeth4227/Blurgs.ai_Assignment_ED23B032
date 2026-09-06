@@ -10,7 +10,7 @@
 
 The primary reproducible workflow is designed to execute smoothly in a standard, free **Google Colab CPU runtime** (no GPU required).
 
-### Option 1: 1-Click Launch via GitHub
+### Click Launch via GitHub
 1. Click the badge above: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Praneeth4227/Blurgs.ai_Assignment_ED23B032/blob/main/notebooks/Blurgs_Vessel_Trajectory_Forecasting.ipynb)
 2. Run the notebook from top to bottom (**Runtime → Run all** or `Ctrl + F9`).
 3. The notebook will automatically install lightweight dependencies (`geopy`, `pyyaml`, `pyarrow`), set up the repository paths, load the real dataset, execute all four models, and display the benchmarks and diagnostic plots.
@@ -19,31 +19,6 @@ The primary reproducible workflow is designed to execute smoothly in a standard,
 
 ---
 
-### Option 2: Colab-to-GitHub Workflow (Run & Save Results)
-To run the notebook in Colab, modify code, and push results back to GitHub without hardcoding secrets:
-
-```bash
-# 1. In Colab, clone the repository
-!git clone https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032.git
-%cd Blurgs.ai_Assignment_ED23B032
-
-# 2. Install requirements
-!pip install -q -r requirements.txt
-
-# 3. Run the pipeline notebook
-# (Execute notebook cells directly)
-
-# 4. Push updated figures/results back securely using Colab Secrets
-from google.colab import userdata
-token = userdata.get("GITHUB_TOKEN") # Store your Personal Access Token in Colab Secrets (Key icon)
-
-!git config --global user.name "Praneeth"
-!git config --global user.email "praneeth@alumni.iitm.ac.in"
-!git remote set-url origin https://{token}@github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032.git
-!git add results/ notebooks/
-!git commit -m "Update experimental results from Google Colab"
-!git push origin main
-```
 
 ---
 
