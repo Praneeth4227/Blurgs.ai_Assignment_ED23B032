@@ -1,25 +1,6 @@
 # Where Will This Vessel Be in 4–6 Hours?
 ### AIS Vessel Trajectory Forecasting over Extended Horizons 
 **Repository:** [https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032](https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032)  
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Praneeth4227/Blurgs.ai_Assignment_ED23B032/blob/main/notebooks/Blurgs_Vessel_Trajectory_Forecasting.ipynb)
-
----
-
-## Running in Google Colab
-
-The primary reproducible workflow is designed to execute smoothly in a standard, free **Google Colab CPU runtime** (no GPU required).
-
-### Click Launch via GitHub
-1. Click the badge above: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Praneeth4227/Blurgs.ai_Assignment_ED23B032/blob/main/notebooks/Blurgs_Vessel_Trajectory_Forecasting.ipynb)
-2. Run the notebook from top to bottom (**Runtime → Run all** or `Ctrl + F9`).
-3. The notebook will automatically install lightweight dependencies (`geopy`, `pyyaml`, `pyarrow`), set up the repository paths, load the real dataset, execute all four models, and display the benchmarks and diagnostic plots.
-
-**Measured Execution Runtime:** **~2.7 minutes** on a standard CPU runtime.
-
----
-
-
 ---
 
 ## 1. Problem Formulation & Objective
