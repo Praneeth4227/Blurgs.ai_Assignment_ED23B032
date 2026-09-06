@@ -1,8 +1,6 @@
 ﻿# Implementation Plan: 4-6 Hour Vessel Trajectory Forecasting
 
-**Project:** Where Will This Vessel Be in 4–6 Hours?  
-**Author:** Praneeth (ED23B032)  
-**Assignment:** Blurgs.ai Take-Home  
+**Project:** Where Will This Vessel Be in 4–6 Hours?   
 **Repository:** `https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032`  
 
 ---
