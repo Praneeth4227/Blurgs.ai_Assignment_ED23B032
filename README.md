@@ -1,7 +1,5 @@
 # Where Will This Vessel Be in 4–6 Hours?
-### AIS Vessel Trajectory Forecasting over Extended Horizons
-**Candidate:** Praneeth (ED23B032)  
-**Take-Home Assignment:** Blurgs.ai  
+### AIS Vessel Trajectory Forecasting over Extended Horizons 
 **Repository:** [https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032](https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032)  
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Praneeth4227/Blurgs.ai_Assignment_ED23B032/blob/main/notebooks/Blurgs_Vessel_Trajectory_Forecasting.ipynb)
