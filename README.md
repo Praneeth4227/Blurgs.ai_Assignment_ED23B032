@@ -1,8 +1,6 @@
 # Where Will This Vessel Be in 4–6 Hours?
 ### AIS Vessel Trajectory Forecasting over Extended Horizons 
-**Repository:** [https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032](https://github.com/Praneeth4227/Blurgs.ai_Assignment_ED23B032)  
 ---
-
 ## 1. Problem Formulation & Objective
 
 Vessel movement is constrained by its recent momentum, hull characteristics, bathymetry, navigational channels, and operational intent. The goal is:
