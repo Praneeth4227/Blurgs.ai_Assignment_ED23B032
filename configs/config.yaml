@@ -1,4 +1,4 @@
-﻿# Configuration for Vessel Trajectory Forecasting (4-6 Hours Horizon)
+# Configuration for Vessel Trajectory Forecasting (4-6 Hours Horizon)
 
 project:
   title: "Where Will This Vessel Be in 4-6 Hours?"
@@ -27,12 +27,12 @@ cleaning:
     lon_min: -180.0
     lon_max: 180.0
   speed_bounds:
-    min_sog: 0.5   # knots (filter out stationary / anchored craft for underway trajectory forecasting)
-    max_sog: 40.0  # knots (commercial vessels rarely exceed 35-40 knots; eliminates GPS glitch outliers)
+    min_sog: 0.0   # knots (physically defensible: retains legitimate slow/stationary craft)
+    max_sog: 45.0  # knots (commercial vessels rarely exceed 35-40 knots; eliminates GPS glitch outliers)
   course_bounds:
     min_cog: 0.0
     max_cog: 360.0
-  max_trajectory_gap_hours: 1.0  # Split trajectory if consecutive AIS records exceed 1 hour gap
+  max_trajectory_gap_hours: 1.0  # Split continuous trajectory segments if consecutive AIS records exceed 1 hour gap
 
 trajectory_window:
   history_duration_hours: 4.0      # Input window [T - 4h, T]
@@ -50,13 +50,12 @@ models:
   linear:
     recent_window_minutes: 30     # Velocity estimation from recent observations
   polynomial:
-    degree: 2                     # Low-degree quadratic polynomial to avoid overfitting oscillations
+    degree: 2                     # Low-degree quadratic polynomial to avoid extrapolation instability
   kinematic:
     use_sog_cog: true
     smooth_window_points: 3       # Optional rolling mean for noisy SOG/COG
   kalman:
     state_dim: 4                  # [x, y, vx, vy]
     measurement_dim: 2            # [x, y]
-    process_noise_pos: 10.0       # Process noise std for position (meters)
-    process_noise_vel: 0.5        # Process noise std for velocity (m/s)
-    measurement_noise: 25.0       # GPS measurement noise std (meters)
+    process_noise_accel: 0.05     # Acceleration spectral density sigma_a (m/s^2)
+    measurement_noise_pos: 20.0   # GPS measurement error sigma_pos (metres)

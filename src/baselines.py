@@ -1,4 +1,4 @@
-﻿"""
+"""
 baselines.py
 Baseline 1: Linear extrapolation and Polynomial extrapolation models.
 Operates on local East-North tangent plane metric coordinates (metres)
@@ -74,7 +74,7 @@ class PolynomialExtrapolationModel:
     """
     Polynomial Extrapolation Baseline.
     Fits a low-degree polynomial (degree 2) to capture gentle trajectory curvature.
-    Higher-degree polynomials are avoided due to Runge's phenomenon / catastrophic overfitting.
+    Higher-degree polynomials are avoided due to the instability of higher-order polynomial extrapolation outside the observed interval.
     """
     def __init__(self, degree: int = 2):
         self.degree = min(degree, 2)  # Strictly enforce degree <= 2

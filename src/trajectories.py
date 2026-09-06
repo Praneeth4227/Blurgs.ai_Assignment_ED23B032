@@ -91,8 +91,10 @@ def extract_forecasting_windows(
     origin_step_hours: float = 1.5
 ) -> List[ForecastingWindow]:
     """
-    Extracts strictly causal forecasting windows [T - history_hours, T] and future targets
-    at T + 4h and T + 6h.
+    Extracts strictly causal forecasting windows.
+    The forecast origin T_origin is anchored to the latest available AIS observation
+    in the history window. Future targets at +4h and +6h are matched relative to T_origin,
+    ensuring zero future leakage into the history set.
     """
     windows = []
     df = df.sort_values(by=["trajectory_id", "base_date_time"]).copy()
@@ -109,40 +111,51 @@ def extract_forecasting_windows(
         if (t_max - t_min).total_seconds() / 3600.0 < total_required_hours:
             continue
 
-        earliest_origin = t_min + timedelta(hours=history_hours)
+        candidate_t = t_min + timedelta(hours=history_hours)
         latest_origin = t_max - timedelta(hours=max_horizon)
 
-        current_origin = earliest_origin
-        while current_origin <= latest_origin:
-            t_hist_start = current_origin - timedelta(hours=history_hours)
+        while candidate_t <= latest_origin:
+            raw_hist = traj[
+                (traj["base_date_time"] >= candidate_t - timedelta(hours=history_hours)) &
+                (traj["base_date_time"] <= candidate_t)
+            ]
+            if len(raw_hist) < min_history_points:
+                candidate_t += timedelta(hours=origin_step_hours)
+                continue
+
+            t_origin = raw_hist["base_date_time"].max()
+            if (candidate_t - t_origin).total_seconds() / 60.0 > target_tolerance_minutes:
+                candidate_t += timedelta(hours=origin_step_hours)
+                continue
+
+            t_hist_start = t_origin - timedelta(hours=history_hours)
             hist = traj[
                 (traj["base_date_time"] >= t_hist_start) &
-                (traj["base_date_time"] <= current_origin)
+                (traj["base_date_time"] <= t_origin)
             ].copy()
 
             if len(hist) < min_history_points:
-                current_origin += timedelta(hours=origin_step_hours)
+                candidate_t += timedelta(hours=origin_step_hours)
                 continue
 
-            actual_hist_span = (hist["base_date_time"].max() - hist["base_date_time"].min()).total_seconds() / 3600.0
+            actual_hist_span = (t_origin - hist["base_date_time"].min()).total_seconds() / 3600.0
             if actual_hist_span < (history_hours - history_span_tolerance_hours):
-                current_origin += timedelta(hours=origin_step_hours)
+                candidate_t += timedelta(hours=origin_step_hours)
                 continue
 
-            last_hist_gap_min = (current_origin - hist["base_date_time"].max()).total_seconds() / 60.0
-            if last_hist_gap_min > target_tolerance_minutes:
-                current_origin += timedelta(hours=origin_step_hours)
-                continue
-
+            future = traj[traj["base_date_time"] > t_origin]
             targets = {}
             target_valid = True
 
             for h in forecast_horizons:
-                nominal_t = current_origin + timedelta(hours=h)
-                time_diffs = (traj["base_date_time"] - nominal_t).abs()
-                min_idx = time_diffs.idxmin()
-                best_match = traj.loc[min_idx]
-                dt_min = time_diffs.loc[min_idx].total_seconds() / 60.0
+                nominal_t = t_origin + timedelta(hours=h)
+                diffs = (future["base_date_time"] - nominal_t).abs()
+                if len(diffs) == 0:
+                    target_valid = False
+                    break
+                min_idx = diffs.idxmin()
+                best_match = future.loc[min_idx]
+                dt_min = diffs.loc[min_idx].total_seconds() / 60.0
 
                 if dt_min > target_tolerance_minutes:
                     target_valid = False
@@ -156,7 +169,7 @@ def extract_forecasting_windows(
                 }
 
             if not target_valid:
-                current_origin += timedelta(hours=origin_step_hours)
+                candidate_t += timedelta(hours=origin_step_hours)
                 continue
 
             sample_counter += 1
@@ -169,14 +182,14 @@ def extract_forecasting_windows(
                 trajectory_id=traj_id,
                 mmsi=mmsi,
                 vessel_type=vessel_type,
-                origin_time=current_origin,
+                origin_time=t_origin,
                 history_df=hist,
                 target_4h=targets[4.0],
                 target_6h=targets[6.0]
             )
             windows.append(window)
 
-            current_origin += timedelta(hours=origin_step_hours)
+            candidate_t = t_origin + timedelta(hours=origin_step_hours)
 
     return windows
 

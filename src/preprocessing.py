@@ -1,6 +1,18 @@
 """
 preprocessing.py
 Data cleaning, anomaly filtering, deduplication, and trajectory splitting for AIS data.
+
+Missing Value and Quality Filtering Methodology:
+  - Latitude/Longitude: Records with null or out-of-bounds coordinates are dropped.
+  - SOG (Speed Over Ground): Records with null SOG are dropped because reported speed
+    is required to validate against physical limits and verify underway state.
+  - COG (Course Over Ground): Null/NaN COG is explicitly permitted when a vessel is
+    stationary (SOG <= 0.5 knots), where Doppler course is physically undefined.
+    For moving vessels (SOG > 0.5 knots), out-of-range compass values are dropped.
+  - Unreasonable Speeds: Speeds above max_sog (45.0 knots) are dropped as physical
+    GPS transmission spikes, while legitimate slow/stationary craft (>= 0.0 knots) are retained.
+  - Observation Gaps: When consecutive reports for a vessel exceed max_gap_hours (1.0 hour),
+    the track is split into distinct continuous trajectory segments rather than interpolated.
 """
 
 import pandas as pd
@@ -42,8 +54,9 @@ def filter_speeds(
 ) -> pd.DataFrame:
     """
     Filters Speed Over Ground (SOG):
-      - Keeps legitimate speeds from 0.0 knots up to max_sog.
-      - SOG > max_sog: physically unrealistic for commercial displacement vessels,
+      - Retains legitimate speeds from 0.0 knots up to max_sog (45.0 knots).
+      - Drops null SOG values because speed verification is required.
+      - Drops SOG > max_sog: physically unrealistic for commercial displacement vessels,
         reflecting GPS jump anomalies or transceiver transmission glitches.
     """
     mask = (

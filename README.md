@@ -17,7 +17,7 @@ The primary reproducible workflow is designed to execute smoothly in a standard,
 2. Run the notebook from top to bottom (**Runtime → Run all** or `Ctrl + F9`).
 3. The notebook will automatically install lightweight dependencies (`geopy`, `pyyaml`, `pyarrow`), set up the repository paths, load the real dataset, execute all four models, and display the benchmarks and diagnostic plots.
 
-**Measured Colab Runtime:** **~42 seconds** on a standard CPU runtime.
+**Measured Execution Runtime:** **~2.7 minutes** on a standard CPU runtime.
 
 ---
 
@@ -53,9 +53,9 @@ token = userdata.get("GITHUB_TOKEN") # Store your Personal Access Token in Colab
 
 Vessel movement is constrained by its recent momentum, hull characteristics, bathymetry, navigational channels, and operational intent. The goal is:
 
-> **Goal:** Given **approximately 4 hours of historical AIS observations** for a vessel up to origin time $T$, forecast its geographic coordinate $(\text{latitude}, \text{longitude})$ at:
-> - **Horizon 1:** $+4\text{ hours}$ ($T + 4\text{h}$)
-> - **Horizon 2:** $+6\text{ hours}$ ($T + 6\text{h}$)
+> **Goal:** Given **approximately 4 hours of historical AIS observations** for a vessel up to forecast origin time $T_{\text{origin}}$, forecast its geographic coordinate $(\text{latitude}, \text{longitude})$ at:
+> - **Horizon 1:** $+4\text{ hours}$ ($T_{\text{origin}} + 4\text{h}$)
+> - **Horizon 2:** $+6\text{ hours}$ ($T_{\text{origin}} + 6\text{h}$)
 
 Predicting coordinates 4 to 6 hours into the future using historical telemetry alone is challenging: vessels frequently alter course around navigational waypoints, reduce throttle when entering harbours, or maneuver into separation lanes. Rather than introducing opaque deep neural networks with millions of parameters, this project follows an interpretable engineering progression:
 1. Data understanding & schema inspection
@@ -66,7 +66,7 @@ Predicting coordinates 4 to 6 hours into the future using historical telemetry a
 6. Quadratic polynomial extrapolation baseline
 7. Kinematic SOG/COG dead-reckoning baseline
 8. 4D constant-velocity Discrete Kalman Filter
-9. Scientifically valid geodesic evaluation on the WGS-84 ellipsoid
+9. Scientifically valid geodesic evaluation on the WGS-84 ellipsoid using the Karney method
 10. Failure analysis & spatial uncertainty quantification
 
 ---
@@ -103,7 +103,7 @@ Raw AIS broadcasts contain transponder glitches, duplicated seconds, and station
    - However, commercial displacement ships rarely exceed 25–30 knots; only high-speed catamaran ferries reach 40–45 knots. Filtering at $45.0\text{ knots}$ removes 188 impossible GPS jump spikes (up to 87.4 kn) while retaining 100% of legitimate slow and transit records.
 4. **Course Filtering:** Verify $0^\circ \le \text{COG} \le 360^\circ$. Allows null COG when stationary.
 5. **Observation Gap Handling:** **We do not interpolate across large gaps.** If consecutive reports for a vessel exceed **1.0 hour**, the trajectory is split into independent sub-tracks.
-6. **Usable Trajectory Criterion:** A trajectory must span at least **10.0 continuous hours** with $\ge 15$ observations to support a 4-hour historical window plus a 6-hour forecast window ($4 + 6 = 10\text{h}$).
+6. **Usable Trajectory Criterion:** A continuous trajectory segment must span at least **10.0 continuous hours** with $\ge 15$ observations to support a 4-hour historical window plus a 6-hour forecast window ($4 + 6 = 10\text{h}$).
 
 ### Cleaning Waterfall:
 ```
@@ -112,7 +112,7 @@ Raw Records in Corridor:            816,653 (100.0%)
   -> Deduplicated:                  816,638 (99.99%)
   -> Speed Filtered (0 - 45 kn):    812,021 (99.43%)
   -> Course Filtered:               812,021 (99.43%)
-  -> Usable Trajectories (>=10h):     1,506 continuous voyages
+  -> Usable Trajectories (>=10h):     1,506 continuous trajectory segments
 ```
 
 ![Preprocessing Funnel](results/figures/preprocessing_funnel.png)
@@ -121,14 +121,14 @@ Raw Records in Corridor:            816,653 (100.0%)
 
 ## 4. Leakage-Safe Formulation & Local Metric Coordinates
 
-### Approximate 4-Hour History Formulation:
-Because AIS pings arrive at irregular ~3-minute intervals, requiring an exact integer-hour span would reject almost all real-world data. We define:
-- **Historical window:** $[T - \Delta t_{\text{hist}}, T]$ where $3.5\text{h} \le \Delta t_{\text{hist}} \le 4.5\text{h}$ (approximately 4 hours) with $\ge 10$ points.
-- **Recency:** The most recent observation must be within $\le 15\text{ minutes}$ of forecast origin $T$.
-- **Target matching:** Actual recorded positions within $\pm 15\text{ minutes}$ of nominal $T + 4\text{h}$ and $T + 6\text{h}$.
+### Forecast Origin Alignment & Causality:
+- **Strict Origin Anchoring:** The forecast origin $T_{\text{origin}}$ is defined strictly as the timestamp of the latest available AIS observation in the history window: $T_{\text{origin}} = \max(t_{\text{history}})$.
+- **Zero Future Leakage:** All observations in the history set satisfy $t \le T_{\text{origin}}$. There are zero future observations in the input feature set.
+- **Target Alignment:** The $+4\text{h}$ and $+6\text{h}$ ground-truth targets are matched relative to $T_{\text{origin}}$ ($T_{\text{origin}} + 4\text{h} \pm 15\text{m}$ and $T_{\text{origin}} + 6\text{h} \pm 15\text{m}$) from observations strictly in $(T_{\text{origin}}, \infty)$.
+- **Approximate 4-Hour History:** Historical observations span approximately 4 hours ($3.5\text{h} \le \text{span} \le 4.5\text{h}$) with $\ge 10$ reports.
 
 ### Zero Lookahead Leakage (Chronological Split):
-To prevent lookahead leakage, forecasting windows are partitioned strictly **chronologically** based on forecast origin timestamp $T$:
+To prevent lookahead leakage, forecasting windows are partitioned strictly **chronologically** based on forecast origin timestamp $T_{\text{origin}}$:
 - **Train Set (70%):** Earlier hours of the day
 - **Validation Set (15%):** Intermediate hours
 - **Test Set (15%):** Final hours (183 unseen test windows)
@@ -145,7 +145,7 @@ To avoid spherical degree distortion ($1^\circ$ longitude varies with latitude: 
 ## 5. Models Evaluated
 
 1. **Linear Extrapolation Baseline:** Estimates recent velocity $(v_x, v_y)$ via linear regression over the recent 30-minute history and propagates constant velocity forward.
-2. **Polynomial Baseline (Degree 2):** Fits quadratic polynomials $x(t)$ and $y(t)$ centered at origin $T$ over the 4-hour window. Degree is strictly limited to 2 to prevent Runge's phenomenon.
+2. **Polynomial Baseline (Degree 2):** Fits quadratic polynomials $x(t)$ and $y(t)$ centered at origin $T_{\text{origin}}$ over the 4-hour window. Degree is strictly limited to 2 to avoid the instability of higher-order polynomial extrapolation outside the observed interval.
 3. **Kinematic Baseline (SOG/COG):** Decomposes onboard transponder Speed Over Ground (knots converted to m/s) and Course Over Ground (bearing clockwise from North) into metric velocity components, with circular mean smoothing over recent observations.
 4. **4D Discrete Kalman Filter:** State vector $\mathbf{x} = [x, y, v_x, v_y]^T$ under constant-velocity kinematics and continuous white-noise acceleration ($\sigma_a = 0.05\text{ m/s}^2, \sigma_{\text{pos}} = 20\text{ m}$). Sequentially filters irregular historical GPS measurements and propagates state and analytical covariance ellipses forward to $+4\text{h}$ and $+6\text{h}$.
 
@@ -153,28 +153,28 @@ To avoid spherical degree distortion ($1^\circ$ longitude varies with latitude: 
 
 ## 6. Final Benchmark Results
 
-All models were evaluated on the **183 unseen test forecasting windows** using true geodesic distances (Karney / Vincenty WGS-84 formula) in kilometres.
+All models were evaluated on the **183 unseen test forecasting windows** using **WGS-84 geodesic distance using geopy (Karney method)** in kilometres.
 
 ### Overall Benchmark Table:
 
 | Model | Horizon | Mean (km) | Median (km) | RMSE (km) | P90 (km) | Test Samples |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Linear** | **+4h** | **26.42** | **13.68** | **44.90** | **64.48** | 183 |
-| **Linear** | **+6h** | **43.34** | **27.05** | **70.89** | **102.00** | 183 |
-| **Kalman Filter** | **+4h** | **28.92** | **16.40** | **47.94** | **67.55** | 183 |
-| **Kalman Filter** | **+6h** | **47.54** | **28.13** | **77.17** | **110.91** | 183 |
-| **Kinematic (SOG/COG)** | +4h | 29.45 | 17.75 | 48.69 | 67.30 | 183 |
-| **Kinematic (SOG/COG)** | +6h | 48.32 | 28.59 | 78.25 | 108.77 | 183 |
-| **Polynomial (d=2)** | +4h | 55.42 | 36.84 | 81.28 | 131.27 | 183 |
-| **Polynomial (d=2)** | +6h | 103.02 | 69.58 | 148.40 | 243.46 | 183 |
+| **Linear** | **+4h** | **23.95** | **10.95** | **40.47** | **65.95** | 183 |
+| **Linear** | **+6h** | **39.71** | **19.83** | **64.73** | **99.43** | 183 |
+| **Kalman Filter** | **+4h** | **26.14** | **10.52** | **46.23** | **61.87** | 183 |
+| **Kalman Filter** | **+6h** | **43.25** | **21.90** | **73.48** | **105.17** | 183 |
+| **Kinematic (SOG/COG)** | +4h | 26.31 | 13.66 | 45.17 | 62.19 | 183 |
+| **Kinematic (SOG/COG)** | +6h | 43.53 | 24.63 | 71.87 | 104.49 | 183 |
+| **Polynomial (d=2)** | +4h | 54.57 | 32.65 | 80.51 | 128.32 | 183 |
+| **Polynomial (d=2)** | +6h | 101.66 | 60.78 | 147.37 | 242.04 | 183 |
 
 ![Model Comparison Horizons](results/figures/model_comparison_horizons.png)
 ![Error CDF Distributions](results/figures/error_distributions_ecdf.png)
 
 ### Key Performance Insights:
-- **Linear Extrapolation** achieved the lowest median error (**13.68 km at +4h**, **27.05 km at +6h**). Estimating velocity over recent 30-minute position differences provides a clean, robust velocity vector without transponder gyro bias.
-- **The Kalman Filter** closely tracks the linear baseline (**16.40 km median at +4h**, **47.94 km RMSE**), outperforming the raw kinematic transponder baseline because it dynamically smooths GPS jitter and produces calibrated spatial uncertainty ellipses.
-- **Polynomial Extrapolation** performed significantly worse (**RMSE 81.28 km at +4h, 148.40 km at +6h**). Quadratic terms accelerate outward rapidly during 4–6 hour extrapolation, amplifying small curvatures in history into large overshoot errors.
+- **Linear Extrapolation** achieved the lowest Mean error (**23.95 km at +4h**, **39.71 km at +6h**) and lowest RMSE (**40.47 km at +4h**, **64.73 km at +6h**). Estimating velocity over recent 30-minute position differences provides a clean, robust velocity vector without transponder gyro bias.
+- **The Kalman Filter** achieves the lowest median error at $+4\text{h}$ (**10.52 km**, slightly better than Linear's 10.95 km) and lowest tail risk (**P90 of 61.87 km**), outperforming the raw kinematic transponder baseline because it dynamically smooths GPS jitter and produces model-based spatial uncertainty ellipses.
+- **Polynomial Extrapolation** performed significantly worse (**RMSE 80.51 km at +4h, 147.37 km at +6h**). Quadratic terms accelerate outward rapidly during 4–6 hour extrapolation due to extrapolation instability, amplifying small historical course adjustments into massive forecast overshoots.
 
 ---
 
@@ -182,18 +182,21 @@ All models were evaluated on the **183 unseen test forecasting windows** using t
 
 | Vessel Category | Model | Horizon | Mean (km) | Median (km) | RMSE (km) | P90 (km) | Samples |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Tug / Towing** | Linear | +4h | 10.44 | **1.46** | 18.77 | 24.18 | 22 |
-| **Tug / Towing** | Kalman Filter | +4h | 12.34 | **0.76** | 24.39 | 34.53 | 22 |
-| **Cargo** | Linear | +4h | 25.03 | **17.87** | 35.52 | 58.97 | 14 |
-| **Cargo** | Kalman Filter | +4h | 26.64 | **17.86** | 38.47 | 68.92 | 14 |
-| **Tanker** | Linear | +4h | 30.64 | 21.74 | 41.82 | 65.58 | 14 |
-| **Tanker** | Kalman Filter | +4h | 28.88 | 21.67 | 40.35 | 63.24 | 14 |
+| **Tug / Towing** | Kinematic | +4h | 7.10 | **0.51** | 13.86 | 21.63 | 29 |
+| **Tug / Towing** | Kalman Filter | +4h | 7.20 | **0.54** | 13.97 | 21.48 | 29 |
+| **Tug / Towing** | Linear | +4h | 10.07 | **2.52** | 18.13 | 26.57 | 29 |
+| **Cargo** | Kalman Filter | +4h | 22.13 | **10.52** | 33.47 | 59.82 | 17 |
+| **Cargo** | Kinematic | +4h | 21.75 | **10.82** | 32.99 | 59.31 | 17 |
+| **Cargo** | Linear | +4h | 21.75 | **12.40** | 32.24 | 54.01 | 17 |
+| **Tanker** | Kinematic | +4h | 28.83 | **19.64** | 40.60 | 63.19 | 14 |
+| **Tanker** | Linear | +4h | 29.68 | **19.70** | 40.97 | 65.12 | 14 |
+| **Tanker** | Kalman Filter | +4h | 28.86 | **20.32** | 40.73 | 63.73 | 14 |
 
 ![Vessel Type Performance](results/figures/vessel_type_performance.png)
 
-- **Tugs / Towing:** Exhibit exceptionally low median errors (**~0.76–1.46 km at +4h**). Tugs operate at low speeds (4–8 knots) in confined coastal waters, minimizing spatial displacement over time.
-- **Cargo Ships:** Cruising at steady speed down deep-water shipping lanes produces consistent, low-variance forecasts (**17.87 km median at +4h**).
-- **Tankers:** Produced slightly higher errors (**21.74 km median at +4h**) because tankers in this corridor maneuver into coastal terminal approaches (Port Everglades, Miami, Tampa).
+- **Tugs / Towing:** Exhibit exceptionally low median errors (**~0.51–0.54 km at +4h**). Tugs operate at low speeds (4–8 knots) in confined coastal waters, minimizing spatial displacement over time.
+- **Cargo Ships:** Cruising at steady speed down deep-water shipping lanes produces consistent, low-variance forecasts (**10.52 km median at +4h** for Kalman).
+- **Tankers:** Produced slightly higher errors (**19.64 km median at +4h**) because tankers in this corridor maneuver into coastal terminal approaches (Port Everglades, Miami, Tampa).
 
 ---
 
@@ -202,7 +205,7 @@ All models were evaluated on the **183 unseen test forecasting windows** using t
 Examining large-error predictions ($>80\text{ km}$) reveals three primary root causes:
 1. **Waypoint Navigational Turns:** Vessels in the Florida Straits follow marine corridors that bend around the Florida Keys. Constant-velocity extrapolation projects straight ahead, leading to divergence once the ship turns $60^\circ - 90^\circ$.
 2. **Port Approach Deceleration:** Commercial vessels entering harbour limits reduce throttle from 18 knots to 4 knots to await pilots, causing dead-reckoning models to overshoot.
-3. **Polynomial Acceleration Divergence:** Quadratic polynomials amplify subtle historical accelerations, leading to runaway divergence at $+6\text{h}$.
+3. **Polynomial Acceleration Divergence:** Quadratic polynomials amplify subtle historical accelerations, leading to runaway divergence at $+6\text{h}$ due to the instability of higher-order polynomial extrapolation outside the observed interval.
 
 ![Success and Failure Case Studies](results/figures/case_studies_success_failure.png)
 
